@@ -19,6 +19,20 @@
   --accent: #818cf8;
   --accent-glow: #818cf840;
   --radius: 14px;
+  --nav-bg: rgba(7, 7, 15, 0.85);
+}
+
+/* ─── Light Theme ────────────────────────────────────────────── */
+[data-theme="light"] {
+  --bg: #f0f2f8;
+  --bg-2: #e4e8f4;
+  --surface: rgba(0, 0, 0, 0.04);
+  --border: rgba(0, 0, 0, 0.10);
+  --text: #111827;
+  --text-muted: #6b7280;
+  --accent: #5b5fcf;
+  --accent-glow: #5b5fcf30;
+  --nav-bg: rgba(240, 242, 248, 0.90);
 }
 
 html,
@@ -72,10 +86,11 @@ body {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(7, 7, 15, 0.85);
+  background: var(--nav-bg);
   backdrop-filter: blur(12px);
 }
 
+/* Make logo act as a home button */
 .cv-nav-logo {
   display: flex;
   align-items: center;
@@ -84,6 +99,36 @@ body {
   font-weight: 700;
   letter-spacing: -0.3px;
   color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.15s;
+}
+
+.cv-nav-logo:hover {
+  opacity: 0.75;
+}
+
+/* ─── Theme Toggle ───────────────────────────────────────────── */
+.theme-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.theme-toggle-btn:hover {
+  color: var(--text);
+  background: var(--accent-glow);
+  border-color: var(--accent);
 }
 
 .cv-logo-dot {
@@ -1246,8 +1291,9 @@ body {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
+  background: rgba(0, 0, 0, 0.80);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   z-index: 100;
   display: flex;
   align-items: center;
@@ -1648,4 +1694,87 @@ body {
   .modal-visibility-toggle {
     grid-template-columns: 1fr;
   }
+}
+
+/* ─── Phase 3: Project name input (ZIP tab) ─────────────────── */
+.zip-project-name-row {
+  margin-bottom: 12px;
+}
+
+.zip-project-name-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+
+.zip-project-name-input::placeholder {
+  color: var(--text-muted);
+}
+
+.zip-project-name-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ─── Phase 3: Scan actions group (share + delete) ──────────── */
+.dash-scan-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dash-icon-btn--danger:hover {
+  border-color: #ef444460;
+  color: #ef4444;
+}
+
+/* ─── Phase 3: Delete confirm inline ────────────────────────── */
+.dash-delete-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.dash-confirm-yes {
+  padding: 4px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid #ef444460;
+  background: #ef444415;
+  color: #ef4444;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.dash-confirm-yes:hover {
+  background: #ef4444;
+  color: #fff;
+}
+
+.dash-confirm-no {
+  padding: 4px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.dash-confirm-no:hover {
+  border-color: var(--accent)50;
+  color: var(--text);
 }

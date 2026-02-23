@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useUser } from '@clerk/nextjs';
-import { useQuery } from 'convex/react';
+import { useUser, UserButton } from '@clerk/nextjs';
+import { useQuery, useMutation } from 'convex/react';
 import { api } from '@/convex/_generated/api';
-import { BarChart2, TrendingUp, Clock, Share2, Plus } from 'lucide-react';
+import { BarChart2, TrendingUp, Clock, Share2, Plus, Trash2 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import ThemeToggle from '@/components/ThemeToggle';
 
 type ScanSummary = {
     _id: string;
@@ -54,6 +55,12 @@ export default function DashboardPage() {
     const router = useRouter();
     const [selectedProject, setSelectedProject] = useState<string | null>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
+    const [deletingScanId, setDeletingScanId] = useState<string | null>(null);
+    const [mounted, setMounted] = useState(false);
+    const deleteScan = useMutation(api.scans.deleteScan);
+
+    // Hydration guard — prevents Date.now() mismatch crash
+    useEffect(() => { setMounted(true); }, []);
 
     const scans = useQuery(
         api.scans.getScansByUser,
@@ -73,7 +80,7 @@ export default function DashboardPage() {
         );
     }
 
-    if (!scans) {
+    if (!scans || !mounted) {
         return (
             <div className="analyze-loading">
                 <div className="loading-ring" />
@@ -107,10 +114,16 @@ export default function DashboardPage() {
         setTimeout(() => setCopiedId(null), 2000);
     }
 
+    async function handleDelete(scanId: string) {
+        if (!user) return;
+        await deleteScan({ scanId, userId: user.id });
+        setDeletingScanId(null);
+    }
+
     return (
         <main className="analyze-main">
             <nav className="cv-nav">
-                <div className="cv-nav-logo">
+                <div className="cv-nav-logo" onClick={() => router.push('/')}>
                     <span className="cv-logo-dot" />
                     CodeVitals
                 </div>
@@ -118,7 +131,9 @@ export default function DashboardPage() {
                     <button className="nav-back-btn" onClick={() => router.push('/')}>
                         <Plus size={14} /> New Analysis
                     </button>
+                    <ThemeToggle />
                     <span className="dash-user">{user.firstName ?? user.emailAddresses[0]?.emailAddress}</span>
+                    <UserButton afterSignOutUrl="/" />
                 </div>
             </nav>
 
@@ -270,13 +285,30 @@ export default function DashboardPage() {
                                                         &nbsp;·&nbsp;{scan.totalFiles} files&nbsp;·&nbsp;{scan.languageMode}
                                                     </div>
                                                 </div>
-                                                <button
-                                                    className="dash-icon-btn"
-                                                    title="Copy share link"
-                                                    onClick={() => copyShareLink(scan.scanId)}
-                                                >
-                                                    {copiedId === scan.scanId ? '✓' : <Share2 size={14} />}
-                                                </button>
+                                                <div className="dash-scan-actions">
+                                                    <button
+                                                        className="dash-icon-btn"
+                                                        title="Copy share link"
+                                                        onClick={() => copyShareLink(scan.scanId)}
+                                                    >
+                                                        {copiedId === scan.scanId ? '✓' : <Share2 size={14} />}
+                                                    </button>
+                                                    {deletingScanId === scan.scanId ? (
+                                                        <div className="dash-delete-confirm">
+                                                            <span>Delete?</span>
+                                                            <button className="dash-confirm-yes" onClick={() => handleDelete(scan.scanId)}>Yes</button>
+                                                            <button className="dash-confirm-no" onClick={() => setDeletingScanId(null)}>Cancel</button>
+                                                        </div>
+                                                    ) : (
+                                                        <button
+                                                            className="dash-icon-btn dash-icon-btn--danger"
+                                                            title="Delete scan"
+                                                            onClick={() => setDeletingScanId(scan.scanId)}
+                                                        >
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </div>
                                         ))}
                                     </div>

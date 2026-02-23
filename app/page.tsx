@@ -2,8 +2,10 @@
 
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Zap, ShieldCheck, TrendingUp, ChevronRight, Upload, FileCode } from 'lucide-react';
+import { useUser, UserButton } from '@clerk/nextjs';
+import { Loader2, Zap, ShieldCheck, TrendingUp, ChevronRight, Upload, FileCode, BarChart2, LogIn } from 'lucide-react';
 import type { AnalysisResult } from '@/lib/analyzer/types';
+import ThemeToggle from '@/components/ThemeToggle';
 
 // ─── Language config ──────────────────────────────────────────────────────────
 
@@ -62,9 +64,11 @@ export default function HomePage() {
   const [dragOver, setDragOver] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [projectName, setProjectName] = useState('');
   const router = useRouter();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { user, isLoaded } = useUser();
 
   const isDeep = language === 'ts' || language === 'js';
   const placeholder = PLACEHOLDERS[language] ?? PLACEHOLDERS.other;
@@ -88,6 +92,8 @@ export default function HomePage() {
       if (!res.ok) { setError(data.error ?? 'Analysis failed. Try again.'); return; }
       sessionStorage.setItem('cv_result', JSON.stringify(data as AnalysisResult));
       sessionStorage.setItem('cv_lang', language);
+      sessionStorage.setItem('cv_language_mode', isDeep ? 'deep' : 'quick');
+      sessionStorage.removeItem('cv_saved');
       router.push('/analyze');
     } catch {
       setError('Network error. Make sure the dev server is running.');
@@ -108,6 +114,9 @@ export default function HomePage() {
       const data = await res.json();
       if (!res.ok) { setError(data.error ?? 'Analysis failed. Try again.'); return; }
       sessionStorage.setItem('cv_project', JSON.stringify(data));
+      sessionStorage.setItem('cv_project_name', projectName.trim() || zipFile.name.replace('.zip', ''));
+      sessionStorage.setItem('cv_language_mode', 'mixed');
+      sessionStorage.removeItem('cv_saved');
       router.push('/project');
     } catch {
       setError('Network error. Make sure the dev server is running.');
@@ -128,11 +137,28 @@ export default function HomePage() {
     <main className="home-main">
       {/* ── Navbar ───────────────────────────────────────────────────── */}
       <nav className="cv-nav">
-        <div className="cv-nav-logo">
+        <div className="cv-nav-logo" onClick={() => router.push('/')}>
           <span className="cv-logo-dot" />
           CodeVitals
         </div>
-        <span className="cv-nav-badge">Beta</span>
+        <div className="cv-nav-actions">
+          <span className="cv-nav-badge">Beta</span>
+          <ThemeToggle />
+          {isLoaded && (
+            user ? (
+              <>
+                <button className="nav-back-btn" onClick={() => router.push('/dashboard')}>
+                  <BarChart2 size={14} /> Dashboard
+                </button>
+                <UserButton afterSignOutUrl="/" />
+              </>
+            ) : (
+              <button className="nav-back-btn" onClick={() => router.push('/sign-in')}>
+                <LogIn size={14} /> Sign In
+              </button>
+            )
+          )}
+        </div>
       </nav>
 
       {/* ── Hero ─────────────────────────────────────────────────────── */}
@@ -243,6 +269,18 @@ export default function HomePage() {
         {/* ── ZIP Tab ── */}
         {tab === 'zip' && (
           <>
+            {/* Project name input */}
+            <div className="zip-project-name-row">
+              <input
+                className="zip-project-name-input"
+                type="text"
+                placeholder="Project name (optional — e.g. MyApp Backend)"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                maxLength={60}
+              />
+            </div>
+
             <div
               className={`zip-dropzone ${dragOver ? 'drag-over' : ''} ${zipFile ? 'has-file' : ''}`}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}

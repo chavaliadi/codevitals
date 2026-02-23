@@ -6,6 +6,7 @@ import { api } from '@/convex/_generated/api';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, TrendingUp } from 'lucide-react';
 import ScoreGauge from '@/components/analyzer/ScoreGauge';
+import ThemeToggle from '@/components/ThemeToggle';
 import type { Grade } from '@/lib/analyzer/types';
 import type { FileResult } from '@/lib/analyzer/aggregate';
 
@@ -77,12 +78,13 @@ export default function ScanSharePage({ params }: { params: Promise<{ id: string
         <main className="analyze-main">
             {/* Navbar */}
             <nav className="cv-nav">
-                <div className="cv-nav-logo">
+                <div className="cv-nav-logo" onClick={() => router.push('/')}>
                     <span className="cv-logo-dot" />
                     CodeVitals
                 </div>
                 <div className="cv-nav-actions">
                     <span className="cv-nav-badge">Shared Report</span>
+                    <ThemeToggle />
                     <button className="nav-back-btn" onClick={() => router.push('/')}>
                         Try CodeVitals Free →
                     </button>

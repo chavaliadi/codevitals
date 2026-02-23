@@ -1,9 +1,7 @@
 import React from "react";
 
-function DashboardProvider({ children }: any) {
-    return(
-        <div>Adithya</div>
-    )
+function DashboardProvider({ children }: { children: React.ReactNode }) {
+    return <>{children}</>;
 }
 
 export default DashboardProvider;

@@ -2,16 +2,19 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useUser, UserButton } from '@clerk/nextjs';
 import type { AnalysisResult } from '@/lib/analyzer/types';
 import ScoreGauge from '@/components/analyzer/ScoreGauge';
 import IssueList from '@/components/analyzer/IssueList';
 import MetricsGrid from '@/components/analyzer/MetricsGrid';
 import AIInsight from '@/components/analyzer/AIInsight';
-import { ArrowLeft, RefreshCw } from 'lucide-react';
+import ThemeToggle from '@/components/ThemeToggle';
+import { ArrowLeft, RefreshCw, BarChart2, LogIn } from 'lucide-react';
 
 export default function AnalyzePage() {
     const [result, setResult] = useState<AnalysisResult | null>(null);
     const router = useRouter();
+    const { user, isLoaded } = useUser();
 
     useEffect(() => {
         const raw = sessionStorage.getItem('cv_result');
@@ -43,7 +46,7 @@ export default function AnalyzePage() {
         <main className="analyze-main">
             {/* ── Navbar ─────────────────────────────────────────────── */}
             <nav className="cv-nav">
-                <div className="cv-nav-logo">
+                <div className="cv-nav-logo" onClick={() => router.push('/')}>
                     <span className="cv-logo-dot" />
                     CodeVitals
                 </div>
@@ -51,6 +54,21 @@ export default function AnalyzePage() {
                     <button className="nav-back-btn" onClick={() => router.push('/')}>
                         <ArrowLeft size={14} /> New Analysis
                     </button>
+                    <ThemeToggle />
+                    {isLoaded && (
+                        user ? (
+                            <>
+                                <button className="nav-back-btn" onClick={() => router.push('/dashboard')}>
+                                    <BarChart2 size={14} /> Dashboard
+                                </button>
+                                <UserButton afterSignOutUrl="/" />
+                            </>
+                        ) : (
+                            <button className="nav-back-btn" onClick={() => router.push('/sign-in')}>
+                                <LogIn size={14} /> Sign In
+                            </button>
+                        )
+                    )}
                 </div>
             </nav>
 

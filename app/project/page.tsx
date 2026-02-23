@@ -7,6 +7,7 @@ import { ArrowLeft, RefreshCw, TrendingUp, ChevronUp, ChevronDown, Minus, Share2
 import type { ProjectResult } from '@/lib/analyzer/aggregate';
 import ScoreGauge from '@/components/analyzer/ScoreGauge';
 import AIInsight from '@/components/analyzer/AIInsight';
+import ThemeToggle from '@/components/ThemeToggle';
 
 export default function ProjectPage() {
     const [project, setProject] = useState<ProjectResult | null>(null);
@@ -18,12 +19,53 @@ export default function ProjectPage() {
     const router = useRouter();
     const { user } = useUser();
 
+    // Clear generated link when visibility changes — Summary and Full need different links
+    useEffect(() => { setShareLink(null); }, [shareVisibility]);
+
     useEffect(() => {
         const raw = sessionStorage.getItem('cv_project');
         if (!raw) { router.replace('/'); return; }
         try { setProject(JSON.parse(raw) as ProjectResult); }
         catch { router.replace('/'); }
     }, [router]);
+
+    // ── Auto-save for signed-in users ──────────────────────────────────────────
+    useEffect(() => {
+        if (!project || !user) return;
+        const alreadySaved = sessionStorage.getItem('cv_saved');
+        if (alreadySaved) return;
+
+        const projectName = sessionStorage.getItem('cv_project_name') ?? 'My Project';
+        const languageMode = sessionStorage.getItem('cv_language_mode') ?? 'mixed';
+
+        fetch('/api/save-scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                userId: user.id,
+                projectName,
+                languageMode,
+                projectScore: project.projectScore,
+                grade: project.projectGrade,
+                categoryScores: project.categoryScores,
+                totalFiles: project.totalFiles,
+                totalLines: project.totalLines,
+                totalFunctions: project.totalFunctions,
+                topImprovements: JSON.stringify(project.topImprovements),
+                aiExplanation: project.aiExplanation ?? '',
+                visibility: 'summary',
+            }),
+        })
+            .then(async (res) => {
+                if (res.ok) {
+                    sessionStorage.setItem('cv_saved', 'true');
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    console.warn('[auto-save] save-scan error:', res.status, err);
+                }
+            })
+            .catch((e) => console.warn('[auto-save] network error:', e));
+    }, [project, user]);
 
     if (!project) {
         return (
@@ -109,7 +151,7 @@ export default function ProjectPage() {
         <main className="analyze-main">
             {/* ── Navbar ── */}
             <nav className="cv-nav">
-                <div className="cv-nav-logo">
+                <div className="cv-nav-logo" onClick={() => router.push('/')}>
                     <span className="cv-logo-dot" />
                     CodeVitals
                 </div>
@@ -122,6 +164,7 @@ export default function ProjectPage() {
                     <button className="nav-back-btn" onClick={() => router.push('/')}>
                         <ArrowLeft size={14} /> New Analysis
                     </button>
+                    <ThemeToggle />
                 </div>
             </nav>
 
