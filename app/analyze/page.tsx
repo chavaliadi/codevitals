@@ -13,6 +13,9 @@ import { ArrowLeft, RefreshCw, BarChart2, LogIn } from 'lucide-react';
 
 export default function AnalyzePage() {
     const [result, setResult] = useState<AnalysisResult | null>(null);
+    const [language, setLanguage] = useState('ts');
+    const [code, setCode] = useState('');
+    const [languageMode, setLanguageMode] = useState<'deep' | 'quick'>('deep');
     const router = useRouter();
     const { user, isLoaded } = useUser();
 
@@ -24,6 +27,10 @@ export default function AnalyzePage() {
         }
         try {
             setResult(JSON.parse(raw) as AnalysisResult);
+            setLanguage(sessionStorage.getItem('cv_lang') ?? 'ts');
+            setCode(sessionStorage.getItem('cv_code') ?? '');
+            const mode = sessionStorage.getItem('cv_language_mode');
+            setLanguageMode((mode === 'deep' || mode === 'quick') ? mode : 'deep');
         } catch {
             router.replace('/');
         }
@@ -74,7 +81,12 @@ export default function AnalyzePage() {
 
             {/* ── Page Header ────────────────────────────────────────── */}
             <div className="analyze-header">
-                <h1 className="analyze-title">Analysis Report</h1>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <h1 className="analyze-title">Analysis Report</h1>
+                    <span className={`mode-badge mode-${languageMode}`}>
+                        {languageMode === 'deep' ? '🔬 Deep Structural Analysis' : '⚡ Quick Structural Scan'}
+                    </span>
+                </div>
                 <div className="analyze-issue-summary">
                     {highCount > 0 && <span className="pill pill-high">{highCount} Worth Fixing</span>}
                     {mediumCount > 0 && <span className="pill pill-medium">{mediumCount} Nice to Fix</span>}
@@ -103,6 +115,11 @@ export default function AnalyzePage() {
                             <span className="meta-value">{result.issues.length}</span>
                         </div>
                     </div>
+                    {languageMode === 'quick' && (
+                        <div className="quick-scan-note">
+                            ⚠️ This score reflects structure only. Syntax errors and runtime issues were not validated.
+                        </div>
+                    )}
                 </div>
 
                 {/* AI Card */}
@@ -124,7 +141,13 @@ export default function AnalyzePage() {
                     Areas to Refine
                     <span className="issues-count">{result.issues.length}</span>
                 </h2>
-                <IssueList issues={result.issues} />
+                <IssueList
+                    issues={result.issues}
+                    code={code}
+                    language={language}
+                    estimatedImprovement={result.estimatedImprovement}
+                    onRerun={() => router.push('/')}
+                />
             </div>
 
             {/* ── CTA ────────────────────────────────────────────────── */}

@@ -1,4 +1,13 @@
-import type { AnalysisResult, Issue, MetricsSummary, Grade } from './types';
+import type { AnalysisResult, Issue, MetricsSummary, Grade, IssueType, Severity, Priority } from './types';
+import { estimateImprovement } from './scorer';
+
+// ─── Priority Helper ───────────────────────────────────────────────
+function determinePriority(type: IssueType, severity: Severity): Priority {
+    if (type === 'unused_imports') return 'quick-win';
+    if (severity === 'low') return 'quick-win';
+    if (type === 'duplication' && severity === 'medium') return 'quick-win';
+    return 'structural';
+}
 
 // ─── Language detection ───────────────────────────────────────────────────────
 
@@ -99,6 +108,42 @@ function countComplexity(code: string): number {
     return (matches?.length ?? 0) + 1; // +1 base path
 }
 
+// ─── Micro-pattern detection (regex-based) ──────────────────────────────────
+
+function detectEmptyCatchBlocks(code: string): number {
+    // Matches: catch (...) { } or catch: (Python)
+    const pattern = /catch\s*\([^)]*\)\s*\{\s*\}/g;
+    return (code.match(pattern) ?? []).length;
+}
+
+function detectRedundantElse(code: string): number {
+    // Matches: return/throw followed by else block
+    const pattern = /(?:return|throw)[^}]*\}\s*else\s*\{/g;
+    return (code.match(pattern) ?? []).length;
+}
+
+function detectBooleanComparisons(code: string): number {
+    // Matches: === true, == false, === True, etc.
+    const pattern = /(?:===|==|!==|!=)\s*(?:true|false|True|False|nullptr|null)\b/g;
+    return (code.match(pattern) ?? []).length;
+}
+
+function detectLongParameterLists(code: string): number {
+    // Looks for function signatures with 6+ params
+    // Simplistic: counts commas in function parameter lists
+    const funcSignatures = code.match(/\w+\s*\([^)]{80,}\)/g) ?? [];
+    return funcSignatures.filter(sig => {
+        const params = sig.match(/,/g) ?? [];
+        return params.length >= 5; // 6+ params means 5+ commas
+    }).length;
+}
+
+function detectConditionChains(code: string): number {
+    // Matches: if (...) ... else if (...) ... else if
+    const pattern = /if\s*\([^)]*\)\s*\{[^}]*\}\s*else\s+if/g;
+    return (code.match(pattern) ?? []).length;
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export function analyzeText(code: string): Omit<AnalysisResult, 'aiExplanation'> {
@@ -136,44 +181,103 @@ export function analyzeText(code: string): Omit<AnalysisResult, 'aiExplanation'>
     const issues: Issue[] = [];
 
     if (nestingDepth >= 4) {
+        const severity: Severity = nestingDepth >= 6 ? 'high' : 'medium';
         issues.push({
             type: 'nesting',
-            severity: nestingDepth >= 6 ? 'high' : 'medium',
+            severity,
+            priority: determinePriority('nesting', severity),
             message: `Some logic here is nested ${nestingDepth} levels deep, which can be tricky to follow. Early returns or small helper functions could make this much clearer.`,
         });
     }
 
     if (avgFunctionLength > 50) {
+        const severity: Severity = avgFunctionLength > 100 ? 'high' : 'medium';
         issues.push({
             type: 'length',
-            severity: avgFunctionLength > 100 ? 'high' : 'medium',
+            severity,
+            priority: determinePriority('length', severity),
             message: `Functions average ${avgFunctionLength} lines. Breaking longer ones into 2–3 smaller functions would make them much easier to scan and maintain.`,
         });
     }
 
     if (avgComplexity >= 10) {
+        const severity: Severity = avgComplexity >= 15 ? 'high' : 'medium';
         issues.push({
             type: 'complexity',
-            severity: avgComplexity >= 15 ? 'high' : 'medium',
+            severity,
+            priority: determinePriority('complexity', severity),
             message: `The code has roughly ${avgComplexity} decision paths on average. Simplifying conditional logic would improve readability and testability.`,
         });
     }
 
     if (duplicationPercentage > 15) {
+        const severity: Severity = duplicationPercentage > 30 ? 'high' : 'medium';
         issues.push({
             type: 'duplication',
-            severity: duplicationPercentage > 30 ? 'high' : 'medium',
+            severity,
+            priority: determinePriority('duplication', severity),
             message: `About ${duplicationPercentage}% of code blocks look similar. Pulling shared logic into a helper would reduce repetition and make future edits easier.`,
         });
     }
 
-    // Scoring (same weighted formula as AST scorer)
+    // ── Micro-patterns ──
+    const emptyCatches = detectEmptyCatchBlocks(code);
+    if (emptyCatches > 0) {
+        issues.push({
+            type: 'empty_catch',
+            severity: 'medium',
+            priority: 'quick-win',
+            message: `${emptyCatches} empty catch block${emptyCatches > 1 ? 's' : ''} silently swallow errors. Either log them, rethrow, or document why it's safe to ignore.`,
+        });
+    }
+
+    const redundantElses = detectRedundantElse(code);
+    if (redundantElses > 0) {
+        issues.push({
+            type: 'redundant_else',
+            severity: 'low',
+            priority: 'quick-win',
+            message: `${redundantElses} else block${redundantElses > 1 ? 's' : ''} after return/throw ${redundantElses > 1 ? 'are' : 'is'} unnecessary. Dedent the content to simplify the flow.`,
+        });
+    }
+
+    const boolComparisons = detectBooleanComparisons(code);
+    if (boolComparisons > 0) {
+        issues.push({
+            type: 'bool_comparison',
+            severity: 'low',
+            priority: 'quick-win',
+            message: `${boolComparisons} comparison${boolComparisons > 1 ? 's' : ''} to true/false ${boolComparisons > 1 ? 'are' : 'is'} redundant. Use the variable directly or negate it instead.`,
+        });
+    }
+
+    const longParams = detectLongParameterLists(code);
+    if (longParams > 0) {
+        issues.push({
+            type: 'long_params',
+            severity: 'medium',
+            priority: 'structural',
+            message: `${longParams} function${longParams > 1 ? 's' : ''} ${longParams > 1 ? 'have' : 'has'} 6+ parameters. Wrapping them in a config object would make it easier to extend.`,
+        });
+    }
+
+    const condChains = detectConditionChains(code);
+    if (condChains > 0) {
+        issues.push({
+            type: 'condition_chain',
+            severity: 'low',
+            priority: 'quick-win',
+            message: `${condChains} if-else-if chain${condChains > 1 ? 's' : ''} can be hard to follow. Consider a switch statement or a lookup object for clarity.`,
+        });
+    }
+
+    // Scoring (same weighted formula as AST scorer, but with stricter penalties)
     function clamp(v: number) { return Math.max(0, Math.min(100, Math.round(v))); }
 
     const complexityScore = clamp(100 - (avgComplexity - 1) * 8);
-    const lengthScore = clamp(100 - Math.max(0, avgFunctionLength - 20) * 1.2);
+    const lengthScore = clamp(100 - Math.max(0, avgFunctionLength - 20) * 0.25); // stricter: penalize poorly structured code
     const nestingScore = clamp(100 - Math.max(0, nestingDepth - 2) * 15);
-    const duplicationScore = clamp(100 - duplicationPercentage * 2);
+    const duplicationScore = clamp(100 - duplicationPercentage * 0.25); // stricter: catch repeated patterns
     const unusedScore = 100; // unused imports skipped in text mode
 
     const score = clamp(
@@ -184,15 +288,19 @@ export function analyzeText(code: string): Omit<AnalysisResult, 'aiExplanation'>
         unusedScore * 0.10
     );
 
+    // ⚠️ INTEGRITY FIX: Cap Quick Mode (text analyzer is always Quick mode)
+    // Structure only — syntax/runtime correctness not validated
+    const cappedScore = Math.min(score, 80);
+
     const grade: Grade =
-        score >= 90 ? 'Excellent' :
-            score >= 70 ? 'Good' :
-                score >= 50 ? 'Fair' :
+        cappedScore >= 90 ? 'Excellent' :
+            cappedScore >= 70 ? 'Good' :
+                cappedScore >= 50 ? 'Fair' :
                     'Critical';
 
     // Sort issues by severity
     const order: Record<string, number> = { high: 0, medium: 1, low: 2 };
     issues.sort((a, b) => order[a.severity] - order[b.severity]);
 
-    return { score, grade, issues, metrics };
+    return { score: cappedScore, grade, issues, metrics, estimatedImprovement: estimateImprovement(issues) };
 }

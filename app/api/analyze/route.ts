@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parseCode } from '@/lib/analyzer/parser';
 import { computeMetrics } from '@/lib/analyzer/metrics';
-import { computeScore, sortIssues } from '@/lib/analyzer/scorer';
+import { computeScore, sortIssues, estimateImprovement } from '@/lib/analyzer/scorer';
 import { analyzeText } from '@/lib/analyzer/textAnalyzer';
 import { GroqProvider } from '@/lib/ai/groq';
 import type { AnalysisResult } from '@/lib/analyzer/types';
@@ -20,10 +20,10 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'No code provided.' }, { status: 400 });
         }
         if (code.trim().length < 10) {
-            return NextResponse.json({ error: 'Code is too short to analyze.' }, { status: 400 });
+            return NextResponse.json({ error: 'Please provide at least 10 characters of code to analyze.' }, { status: 400 });
         }
         if (code.length > 100_000) {
-            return NextResponse.json({ error: 'Code exceeds 100KB limit. Try a smaller snippet.' }, { status: 400 });
+            return NextResponse.json({ error: 'Code exceeds 100KB limit. Try analyzing a smaller file or use ZIP upload for projects.' }, { status: 400 });
         }
 
         const isDeep = DEEP_LANGUAGES.has(language);
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ error: 'Failed to parse code. Check for syntax errors.' }, { status: 422 });
             }
             const { summary, issues: rawIssues } = computeMetrics(ast, code);
-            const { score, grade } = computeScore(summary, rawIssues);
+            const { score, grade } = computeScore(summary, rawIssues, 'deep');
             const issues = sortIssues(rawIssues);
             analysisBase = { score, grade, issues, metrics: summary };
         } else {
@@ -46,12 +46,18 @@ export async function POST(req: NextRequest) {
             analysisBase = analyzeText(code);
         }
 
-        // AI explanation (always)
-        const aiExplanation = await ai.explain(analysisBase.metrics, analysisBase.issues, analysisBase.score);
+        // AI explanation (always) — pass mode context for file-aware prompt
+        const aiExplanation = await ai.explain(
+            analysisBase.metrics,
+            analysisBase.issues,
+            analysisBase.score,
+            { mode: isDeep ? 'deep' : 'quick' }
+        );
 
         const result: AnalysisResult = {
             ...analysisBase,
             aiExplanation,
+            estimatedImprovement: estimateImprovement(analysisBase.issues),
         };
 
         return NextResponse.json(result);

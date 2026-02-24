@@ -12,7 +12,28 @@ function clamp(val: number, min = 0, max = 100): number {
     return Math.max(min, Math.min(max, val));
 }
 
-export function computeScore(metrics: MetricsSummary, issues: Issue[]): {
+/** Calculate estimated improvement from quick wins (quick-win priority issues only) */
+export function estimateImprovement(issues: Issue[]): number {
+    let improvement = 0;
+
+    // Only count quick-win priority issues
+    const quickWins = issues.filter((issue) => issue.priority === 'quick-win');
+
+    for (const issue of quickWins) {
+        if (issue.severity === 'high') {
+            improvement += 2;
+        } else if (issue.severity === 'medium') {
+            improvement += 1;
+        } else if (issue.severity === 'low') {
+            improvement += 0.5;
+        }
+    }
+
+    // Cap at 10 pts — never promise huge jumps
+    return Math.min(improvement, 10);
+}
+
+export function computeScore(metrics: MetricsSummary, issues: Issue[], mode?: 'deep' | 'quick'): {
     score: number;
     breakdown: ScoreBreakdown;
     grade: Grade;
@@ -39,13 +60,20 @@ export function computeScore(metrics: MetricsSummary, issues: Issue[]): {
     // Unused imports (10% weight)
     const unusedScore = clamp(100 - metrics.unusedImportCount * 10);
 
-    const score = Math.round(
+    let score = Math.round(
         complexityScore * 0.30 +
         lengthScore * 0.25 +
         nestingScore * 0.20 +
         duplicationScore * 0.15 +
         unusedScore * 0.10
     );
+
+    // ⚠️ INTEGRITY FIX: Cap Quick Mode scores
+    // Quick mode only analyzes structure, not syntax/runtime correctness
+    // Capping prevents false confidence on broken code
+    if (mode === 'quick') {
+        score = Math.min(score, 80);
+    }
 
     const grade: Grade =
         score >= 90 ? 'Excellent' :

@@ -50,4 +50,10 @@ export default defineSchema({
     .index("by_userId", ["userId"])
     .index("by_scanId", ["scanId"])
     .index("by_userId_createdAt", ["userId", "createdAt"]),
+
+  // Lightweight analytics — no user tracking, just feature usage
+  AnalyticsTable: defineTable({
+    event: v.string(),      // e.g. "suggest_fix_clicked"
+    timestamp: v.number(),  // Date.now()
+  }),
 });

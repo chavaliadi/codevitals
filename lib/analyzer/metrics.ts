@@ -1,9 +1,20 @@
 import traverse from '@babel/traverse';
 import * as t from '@babel/types';
 import type { File } from '@babel/types';
-import type { Issue, MetricsSummary } from './types';
+import type { Issue, MetricsSummary, IssueType, Severity, Priority } from './types';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
+
+/** Determine priority based on issue type and severity */
+function determinePriority(type: IssueType, severity: Severity): Priority {
+    // Quick wins: easy fixes, low effort
+    if (type === 'unused_imports') return 'quick-win';
+    if (severity === 'low') return 'quick-win';
+    if (type === 'duplication' && severity === 'medium') return 'quick-win';
+
+    // Structural: requires refactoring
+    return 'structural';
+}
 
 function countLines(node: t.Node): number {
     if (!node.loc) return 0;
@@ -95,7 +106,136 @@ function detectDuplication(code: string): number {
     return Math.round((duplicateWindows / totalWindows) * 100);
 }
 
-/** Collect declared imports vs actual usages */
+/** Detect empty catch blocks */
+function detectEmptyCatchBlocks(ast: t.File): Array<{ line: number }> {
+    const issues: Array<{ line: number }> = [];
+
+    traverse(ast, {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        CatchClause(path: any) {
+            const node = path.node as t.CatchClause;
+            // Empty if body has no statements
+            if (node.body.body.length === 0) {
+                issues.push({ line: node.loc?.start.line ?? 0 });
+            }
+        },
+    });
+
+    return issues;
+}
+
+/** Detect redundant else blocks after return/throw */
+function detectRedundantElse(ast: t.File): Array<{ line: number; fnName: string }> {
+    const issues: Array<{ line: number; fnName: string }> = [];
+
+    traverse(ast, {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        IfStatement(path: any) {
+            const node = path.node as t.IfStatement;
+
+            // Check if consequent ends with return or throw
+            let hasFinalReturn = false;
+            const lastStmt = (node.consequent as t.BlockStatement).body?.[
+                (node.consequent as t.BlockStatement).body.length - 1
+            ];
+            if (lastStmt && (t.isReturnStatement(lastStmt) || t.isThrowStatement(lastStmt))) {
+                hasFinalReturn = true;
+            }
+
+            // If there's a return/throw and an else block, flag it
+            if (hasFinalReturn && node.alternate) {
+                // Find function name
+                let fnName = 'anonymous';
+                let parent = path.getFunctionParent();
+                if (parent?.node?.id) fnName = parent.node.id.name;
+                issues.push({ line: node.alternate.loc?.start.line ?? 0, fnName });
+            }
+        },
+    });
+
+    return issues;
+}
+
+/** Detect boolean comparisons: x === true, x == false, etc. */
+function detectBooleanComparisons(ast: t.File): Array<{ line: number }> {
+    const issues: Array<{ line: number }> = [];
+
+    traverse(ast, {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        BinaryExpression(path: any) {
+            const node = path.node as t.BinaryExpression;
+            if (!['===', '==', '!==', '!='].includes(node.operator)) return;
+
+            // Check if right side is true/false/True/False literal
+            const right = node.right;
+            const isBoolComparison =
+                (t.isBooleanLiteral(right) && (right as t.BooleanLiteral).value !== null) ||
+                (t.isIdentifier(right) && ['true', 'false', 'True', 'False'].includes(right.name));
+
+            if (isBoolComparison) {
+                issues.push({ line: node.loc?.start.line ?? 0 });
+            }
+        },
+    });
+
+    return issues;
+}
+
+/** Detect long parameter lists (>5 parameters) */
+function detectLongParamLists(ast: t.File): Array<{ line: number; fnName: string; paramCount: number }> {
+    const issues: Array<{ line: number; fnName: string; paramCount: number }> = [];
+
+    traverse(ast, {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        'FunctionDeclaration|FunctionExpression|ArrowFunctionExpression'(path: any) {
+            const node = path.node as t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression;
+            const paramCount = node.params.length;
+
+            if (paramCount > 5) {
+                let fnName = 'anonymous';
+                if (t.isFunctionDeclaration(node) && node.id) {
+                    fnName = node.id.name;
+                } else if (
+                    path.parentPath?.isVariableDeclarator() &&
+                    t.isIdentifier((path.parentPath.node as t.VariableDeclarator).id)
+                ) {
+                    fnName = ((path.parentPath.node as t.VariableDeclarator).id as t.Identifier).name;
+                }
+                issues.push({ line: node.loc?.start.line ?? 0, fnName, paramCount });
+            }
+        },
+    });
+
+    return issues;
+}
+
+/** Detect repeated condition chains (3+ consecutive if-else-if) */
+function detectConditionChains(ast: t.File): Array<{ line: number }> {
+    const issues: Array<{ line: number }> = [];
+
+    traverse(ast, {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        IfStatement(path: any) {
+            let count = 0;
+            let current = path.node as t.IfStatement;
+
+            // Count chain depth
+            while (current.alternate && t.isIfStatement(current.alternate)) {
+                count++;
+                current = current.alternate as t.IfStatement;
+            }
+
+            // Flag if 3 or more in chain
+            if (count >= 2) {
+                issues.push({ line: path.node.loc?.start.line ?? 0 });
+            }
+        },
+    });
+
+    return issues;
+}
+
+/** Detect declared imports vs actual usages */
 function detectUnusedImports(ast: t.File): string[] {
     const imported: Map<string, number> = new Map(); // name -> line
     const usedIdentifiers = new Set<string>();
@@ -174,9 +314,11 @@ export function computeMetrics(ast: t.File, code: string): RawMetrics {
             const startLine = node.loc?.start.line;
 
             if (complexity >= 10) {
+                const severity: Severity = complexity >= 15 ? 'high' : 'medium';
                 issues.push({
                     type: 'complexity',
-                    severity: complexity >= 15 ? 'high' : 'medium',
+                    severity,
+                    priority: determinePriority('complexity', severity),
                     message: `"${fnName}" has ${complexity} decision paths through it. Splitting it into smaller focused functions would make it easier to read and test.`,
                     line: startLine,
                     name: fnName,
@@ -184,9 +326,11 @@ export function computeMetrics(ast: t.File, code: string): RawMetrics {
             }
 
             if (lines > 50) {
+                const severity: Severity = lines > 100 ? 'high' : 'medium';
                 issues.push({
                     type: 'length',
-                    severity: lines > 100 ? 'high' : 'medium',
+                    severity,
+                    priority: determinePriority('length', severity),
                     message: `"${fnName}" is ${lines} lines long. Breaking it into 2–3 smaller functions would make it much easier to scan and maintain.`,
                     line: startLine,
                     name: fnName,
@@ -198,9 +342,11 @@ export function computeMetrics(ast: t.File, code: string): RawMetrics {
     // ── nesting depth ──
     const maxDepth = measureMaxDepth(ast);
     if (maxDepth >= 4) {
+        const severity: Severity = maxDepth >= 6 ? 'high' : 'medium';
         issues.push({
             type: 'nesting',
-            severity: maxDepth >= 6 ? 'high' : 'medium',
+            severity,
+            priority: determinePriority('nesting', severity),
             message: `Some logic here is nested ${maxDepth} levels deep, which can be tricky to follow. Early returns or small helper functions could make this much clearer.`,
         });
     }
@@ -208,9 +354,11 @@ export function computeMetrics(ast: t.File, code: string): RawMetrics {
     // ── duplication ──
     const dupePct = detectDuplication(code);
     if (dupePct > 15) {
+        const severity: Severity = dupePct > 30 ? 'high' : 'medium';
         issues.push({
             type: 'duplication',
-            severity: dupePct > 30 ? 'high' : 'medium',
+            severity,
+            priority: determinePriority('duplication', severity),
             message: `About ${dupePct}% of code blocks look similar to each other. Pulling shared logic into a helper function would reduce repetition and make future edits easier.`,
         });
     }
@@ -222,11 +370,73 @@ export function computeMetrics(ast: t.File, code: string): RawMetrics {
             issues.push({
                 type: 'unused_imports',
                 severity: 'low',
+                priority: 'quick-win',
                 message: `"${name}" is imported but not used anywhere. Removing it keeps things tidy and slightly reduces bundle size.`,
                 name,
             });
         });
     }
+
+    // ── micro-patterns: empty catch blocks ──
+    const emptyCatches = detectEmptyCatchBlocks(ast);
+    emptyCatches.forEach((catch_) => {
+        issues.push({
+            type: 'empty_catch',
+            severity: 'medium',
+            priority: 'quick-win',
+            message: `Empty catch block silently swallows errors. Either log them, rethrow, or document why it's safe to ignore.`,
+            line: catch_.line,
+        });
+    });
+
+    // ── micro-patterns: redundant else ──
+    const redundantElses = detectRedundantElse(ast);
+    redundantElses.forEach((issue) => {
+        issues.push({
+            type: 'redundant_else',
+            severity: 'low',
+            priority: 'quick-win',
+            message: `Else block after a return/throw is unnecessary. Dedent the else content to simplify the flow.`,
+            line: issue.line,
+        });
+    });
+
+    // ── micro-patterns: boolean comparisons ──
+    const boolComparisons = detectBooleanComparisons(ast);
+    boolComparisons.forEach((comp) => {
+        issues.push({
+            type: 'bool_comparison',
+            severity: 'low',
+            priority: 'quick-win',
+            message: `Comparing to true/false is redundant. Use the variable directly or negate it instead.`,
+            line: comp.line,
+        });
+    });
+
+    // ── micro-patterns: long parameter lists ──
+    const longParams = detectLongParamLists(ast);
+    longParams.forEach((fn) => {
+        issues.push({
+            type: 'long_params',
+            severity: 'medium',
+            priority: 'structural',
+            message: `"${fn.fnName}" has ${fn.paramCount} parameters. Wrapping them in a config object or splitting the function would make it easier to extend.`,
+            line: fn.line,
+            name: fn.fnName,
+        });
+    });
+
+    // ── micro-patterns: condition chains ──
+    const condChains = detectConditionChains(ast);
+    condChains.forEach((chain) => {
+        issues.push({
+            type: 'condition_chain',
+            severity: 'low',
+            priority: 'quick-win',
+            message: `Long if-else-if chain can be hard to follow. Consider a switch statement or a lookup object for clarity.`,
+            line: chain.line,
+        });
+    });
 
     const avg = (arr: number[]) =>
         arr.length === 0 ? 0 : Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10;

@@ -1,10 +1,16 @@
 'use client';
 
+import { useState } from 'react';
 import type { Issue, Severity } from '@/lib/analyzer/types';
-import { AlertTriangle, AlertCircle, Info, Zap, Copy, Layers, FileX } from 'lucide-react';
+import { AlertTriangle, AlertCircle, Zap, Copy, Layers, FileX, Sparkles } from 'lucide-react';
+import SuggestFixModal from './SuggestFixModal';
 
 interface IssueListProps {
     issues: Issue[];
+    code?: string;
+    language?: string;
+    estimatedImprovement?: number;
+    onRerun?: () => void;
 }
 
 const severityConfig: Record<Severity, { label: string; color: string; bg: string }> = {
@@ -29,7 +35,14 @@ const typeLabels: Record<string, string> = {
     unused_imports: 'Unused Import',
 };
 
-export default function IssueList({ issues }: IssueListProps) {
+// Issue types where AI suggestion adds real value
+const SUGGEST_FIX_TYPES = new Set(['complexity', 'length', 'nesting']);
+const DEEP_LANGUAGES = new Set(['js', 'ts']);
+
+export default function IssueList({ issues, code = '', language = 'ts', estimatedImprovement, onRerun }: IssueListProps) {
+    const [activeModal, setActiveModal] = useState<Issue | null>(null);
+    const isDeep = DEEP_LANGUAGES.has(language);
+
     if (issues.length === 0) {
         return (
             <div className="issue-list-empty">
@@ -39,32 +52,96 @@ export default function IssueList({ issues }: IssueListProps) {
         );
     }
 
+    // Group issues by priority
+    const quickWins = issues.filter(i => i.priority === 'quick-win');
+    const structural = issues.filter(i => i.priority === 'structural');
+
+    const renderIssue = (issue: Issue, idx: number) => {
+        const sev = severityConfig[issue.severity];
+        const canSuggest = SUGGEST_FIX_TYPES.has(issue.type);
+        const priorityBadge = issue.priority === 'quick-win' ? '⚡ Quick Win' : '🔧 Structural';
+
+        return (
+            <div
+                key={idx}
+                className="issue-item"
+                style={{ borderLeft: `3px solid ${sev.color}`, background: sev.bg }}
+            >
+                <div className="issue-header">
+                    <span className="issue-type-badge" style={{ color: sev.color }}>
+                        {typeIcons[issue.type]}
+                        {typeLabels[issue.type] ?? issue.type}
+                    </span>
+                    <span className="issue-priority-badge">
+                        {priorityBadge}
+                    </span>
+                    <span className="issue-severity" style={{ color: sev.color }}>
+                        {sev.label}
+                    </span>
+                    {issue.line && (
+                        <span className="issue-line">Line {issue.line}</span>
+                    )}
+                    {canSuggest && (
+                        <button
+                            className={`suggest-fix-btn${!isDeep ? ' disabled' : ''}`}
+                            onClick={() => isDeep && setActiveModal(issue)}
+                            title={isDeep
+                                ? 'Get an AI-suggested fix for this issue'
+                                : 'Available for JS/TS Deep Analysis only'}
+                            aria-disabled={!isDeep}
+                        >
+                            <Sparkles size={12} />
+                            Suggest Fix
+                        </button>
+                    )}
+                </div>
+                <p className="issue-message">{issue.message}</p>
+            </div>
+        );
+    };
+
     return (
-        <div className="issue-list">
-            {issues.map((issue, idx) => {
-                const sev = severityConfig[issue.severity];
-                return (
-                    <div
-                        key={idx}
-                        className="issue-item"
-                        style={{ borderLeft: `3px solid ${sev.color}`, background: sev.bg }}
-                    >
-                        <div className="issue-header">
-                            <span className="issue-type-badge" style={{ color: sev.color }}>
-                                {typeIcons[issue.type]}
-                                {typeLabels[issue.type] ?? issue.type}
-                            </span>
-                            <span className="issue-severity" style={{ color: sev.color }}>
-                                {sev.label}
-                            </span>
-                            {issue.line && (
-                                <span className="issue-line">Line {issue.line}</span>
-                            )}
-                        </div>
-                        <p className="issue-message">{issue.message}</p>
+        <>
+            <div className="issue-list">
+                {estimatedImprovement && estimatedImprovement > 0 && (
+                    <div className="estimated-improvement-banner">
+                        <span style={{ fontWeight: 500 }}>Estimated improvement if quick wins are addressed:</span>
+                        <span style={{ fontSize: '16px', fontWeight: 600, color: '#22c55e' }}>+{estimatedImprovement.toFixed(1)} pts</span>
                     </div>
-                );
-            })}
-        </div>
+                )}
+
+                {quickWins.length > 0 && (
+                    <>
+                        <div className="issue-group-header">
+                            <Zap size={16} />
+                            <span>Quick Wins</span>
+                            <span className="issue-group-count">{quickWins.length}</span>
+                        </div>
+                        {quickWins.map((issue, idx) => renderIssue(issue, idx))}
+                    </>
+                )}
+
+                {structural.length > 0 && (
+                    <>
+                        <div className="issue-group-header">
+                            <Layers size={16} />
+                            <span>Structural Refactors</span>
+                            <span className="issue-group-count">{structural.length}</span>
+                        </div>
+                        {structural.map((issue, idx) => renderIssue(issue, idx + quickWins.length))}
+                    </>
+                )}
+            </div>
+
+            {activeModal && (
+                <SuggestFixModal
+                    issue={activeModal}
+                    codeSnippet={code}
+                    language={language}
+                    onClose={() => setActiveModal(null)}
+                    onRerun={onRerun}
+                />
+            )}
+        </>
     );
 }

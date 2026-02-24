@@ -48,7 +48,7 @@ async function analyzeFile(
         try {
             const ast = parseCode(code, getLang(filename));
             const { summary, issues: rawIssues } = computeMetrics(ast, code);
-            const { score, grade } = computeScore(summary, rawIssues);
+            const { score, grade } = computeScore(summary, rawIssues, 'deep');
             const issues = sortIssues(rawIssues);
             return { score, grade, issues, metrics: summary };
         } catch {
@@ -72,8 +72,13 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Please upload a .zip file.' }, { status: 400 });
         }
 
-        if (file.size > 10 * 1024 * 1024) { // 10 MB limit
-            return NextResponse.json({ error: 'ZIP file must be under 10MB.' }, { status: 400 });
+        // 3MB soft limit for optimal performance
+        if (file.size > 3 * 1024 * 1024 && file.size <= 10 * 1024 * 1024) {
+            console.warn(`[analyze-zip] Large ZIP uploaded: ${(file.size / 1024 / 1024).toFixed(1)}MB`);
+        }
+
+        if (file.size > 10 * 1024 * 1024) { // 10 MB hard limit
+            return NextResponse.json({ error: 'ZIP file must be under 10MB for optimal analysis.' }, { status: 400 });
         }
 
         // Extract ZIP
@@ -89,9 +94,9 @@ export async function POST(req: NextRequest) {
             }, { status: 422 });
         }
 
-        if (entries.length > 50) {
+        if (entries.length > 150) {
             return NextResponse.json({
-                error: 'ZIP contains too many files. Limit is 50 files per scan.'
+                error: `ZIP contains ${entries.length} files. Limit is 150 files per scan. Try analyzing a specific subdirectory.`
             }, { status: 422 });
         }
 
@@ -141,8 +146,14 @@ export async function POST(req: NextRequest) {
 
         const aiExplanation = await ai.explain(
             projectMetrics,
-            worstFile ? [{ type: 'complexity' as const, severity: 'medium' as const, message: `Weakest file: ${worstFile.filename} (score ${worstFile.score}/100)` }] : [],
-            avgScore
+            worstFile ? [{
+                type: 'complexity' as const,
+                severity: 'medium' as const,
+                priority: 'structural' as const,
+                message: `Weakest file: ${worstFile.filename} (score ${worstFile.score}/100)`
+            }] : [],
+            avgScore,
+            { filename: worstFile?.filename, mode: worstFile ? getMode(worstFile.filename) : 'quick' }
         );
 
         const project = aggregateResults(fileResults, aiExplanation);

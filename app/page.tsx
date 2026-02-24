@@ -92,6 +92,7 @@ export default function HomePage() {
       if (!res.ok) { setError(data.error ?? 'Analysis failed. Try again.'); return; }
       sessionStorage.setItem('cv_result', JSON.stringify(data as AnalysisResult));
       sessionStorage.setItem('cv_lang', language);
+      sessionStorage.setItem('cv_code', code);
       sessionStorage.setItem('cv_language_mode', isDeep ? 'deep' : 'quick');
       sessionStorage.removeItem('cv_saved');
       router.push('/analyze');
