@@ -1,5 +1,6 @@
 import type { AnalysisResult, Issue, MetricsSummary, Grade, IssueType, Severity, Priority } from './types';
 import { estimateImprovement } from './scorer';
+import { getLanguageModule } from './languages/index';
 
 // ─── Priority Helper ───────────────────────────────────────────────
 function determinePriority(type: IssueType, severity: Severity): Priority {
@@ -146,7 +147,7 @@ function detectConditionChains(code: string): number {
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-export function analyzeText(code: string): Omit<AnalysisResult, 'aiExplanation'> {
+export async function analyzeText(code: string, language?: string): Promise<Omit<AnalysisResult, 'aiExplanation'>> {
     const lines = code.split('\n');
     const totalLines = lines.length;
 
@@ -184,6 +185,7 @@ export function analyzeText(code: string): Omit<AnalysisResult, 'aiExplanation'>
         const severity: Severity = nestingDepth >= 6 ? 'high' : 'medium';
         issues.push({
             type: 'nesting',
+            category: 'structural',
             severity,
             priority: determinePriority('nesting', severity),
             message: `Some logic here is nested ${nestingDepth} levels deep, which can be tricky to follow. Early returns or small helper functions could make this much clearer.`,
@@ -194,6 +196,7 @@ export function analyzeText(code: string): Omit<AnalysisResult, 'aiExplanation'>
         const severity: Severity = avgFunctionLength > 100 ? 'high' : 'medium';
         issues.push({
             type: 'length',
+            category: 'structural',
             severity,
             priority: determinePriority('length', severity),
             message: `Functions average ${avgFunctionLength} lines. Breaking longer ones into 2–3 smaller functions would make them much easier to scan and maintain.`,
@@ -204,6 +207,7 @@ export function analyzeText(code: string): Omit<AnalysisResult, 'aiExplanation'>
         const severity: Severity = avgComplexity >= 15 ? 'high' : 'medium';
         issues.push({
             type: 'complexity',
+            category: 'structural',
             severity,
             priority: determinePriority('complexity', severity),
             message: `The code has roughly ${avgComplexity} decision paths on average. Simplifying conditional logic would improve readability and testability.`,
@@ -214,6 +218,7 @@ export function analyzeText(code: string): Omit<AnalysisResult, 'aiExplanation'>
         const severity: Severity = duplicationPercentage > 30 ? 'high' : 'medium';
         issues.push({
             type: 'duplication',
+            category: 'structural',
             severity,
             priority: determinePriority('duplication', severity),
             message: `About ${duplicationPercentage}% of code blocks look similar. Pulling shared logic into a helper would reduce repetition and make future edits easier.`,
@@ -225,6 +230,7 @@ export function analyzeText(code: string): Omit<AnalysisResult, 'aiExplanation'>
     if (emptyCatches > 0) {
         issues.push({
             type: 'empty_catch',
+            category: 'structural',
             severity: 'medium',
             priority: 'quick-win',
             message: `${emptyCatches} empty catch block${emptyCatches > 1 ? 's' : ''} silently swallow errors. Either log them, rethrow, or document why it's safe to ignore.`,
@@ -235,6 +241,7 @@ export function analyzeText(code: string): Omit<AnalysisResult, 'aiExplanation'>
     if (redundantElses > 0) {
         issues.push({
             type: 'redundant_else',
+            category: 'structural',
             severity: 'low',
             priority: 'quick-win',
             message: `${redundantElses} else block${redundantElses > 1 ? 's' : ''} after return/throw ${redundantElses > 1 ? 'are' : 'is'} unnecessary. Dedent the content to simplify the flow.`,
@@ -245,6 +252,7 @@ export function analyzeText(code: string): Omit<AnalysisResult, 'aiExplanation'>
     if (boolComparisons > 0) {
         issues.push({
             type: 'bool_comparison',
+            category: 'structural',
             severity: 'low',
             priority: 'quick-win',
             message: `${boolComparisons} comparison${boolComparisons > 1 ? 's' : ''} to true/false ${boolComparisons > 1 ? 'are' : 'is'} redundant. Use the variable directly or negate it instead.`,
@@ -255,6 +263,7 @@ export function analyzeText(code: string): Omit<AnalysisResult, 'aiExplanation'>
     if (longParams > 0) {
         issues.push({
             type: 'long_params',
+            category: 'structural',
             severity: 'medium',
             priority: 'structural',
             message: `${longParams} function${longParams > 1 ? 's' : ''} ${longParams > 1 ? 'have' : 'has'} 6+ parameters. Wrapping them in a config object would make it easier to extend.`,
@@ -265,19 +274,43 @@ export function analyzeText(code: string): Omit<AnalysisResult, 'aiExplanation'>
     if (condChains > 0) {
         issues.push({
             type: 'condition_chain',
+            category: 'structural',
             severity: 'low',
             priority: 'quick-win',
             message: `${condChains} if-else-if chain${condChains > 1 ? 's' : ''} can be hard to follow. Consider a switch statement or a lookup object for clarity.`,
         });
     }
 
-    // Scoring (same weighted formula as AST scorer, but with stricter penalties)
+    // ── Language-specific patterns (Phase 5) ──
+    // Call language module if available and language is specified
+       // ── Language-specific patterns (Phase 5) ──
+    // Call language module if available and language is specified
+    if (language) {
+        try {
+            const languageModule = await getLanguageModule(language);
+            if (languageModule) {
+                const languageIssues = languageModule.detectPatterns(code);
+                // ✅ Tag all language issues with category: 'language'
+                const taggedIssues = languageIssues.map(issue => ({
+                    ...issue,
+                    category: 'language' as const,
+                    priority: issue.priority || 'quick-win' as const,
+                }));
+                issues.push(...taggedIssues);
+            }
+        } catch (error) {
+            // Silently fail if language module unavailable
+            console.warn(`Language module error for ${language}:`, error);
+        }
+    }
+
+    // Scoring (same weighted formula as AST scorer)
     function clamp(v: number) { return Math.max(0, Math.min(100, Math.round(v))); }
 
     const complexityScore = clamp(100 - (avgComplexity - 1) * 8);
-    const lengthScore = clamp(100 - Math.max(0, avgFunctionLength - 20) * 0.25); // stricter: penalize poorly structured code
+    const lengthScore = clamp(100 - Math.max(0, avgFunctionLength - 20) * 1.2);
     const nestingScore = clamp(100 - Math.max(0, nestingDepth - 2) * 15);
-    const duplicationScore = clamp(100 - duplicationPercentage * 0.25); // stricter: catch repeated patterns
+    const duplicationScore = clamp(100 - duplicationPercentage * 2);
     const unusedScore = 100; // unused imports skipped in text mode
 
     const score = clamp(

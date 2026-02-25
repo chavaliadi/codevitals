@@ -1,6 +1,7 @@
 export type Grade = 'Excellent' | 'Good' | 'Fair' | 'Critical';
 export type Severity = 'high' | 'medium' | 'low';
 export type Priority = 'quick-win' | 'structural';
+export type IssueCategory = 'structural' | 'language';
 export type IssueType =
   | 'complexity'
   | 'length'
@@ -11,10 +12,24 @@ export type IssueType =
   | 'redundant_else'
   | 'bool_comparison'
   | 'long_params'
-  | 'condition_chain';
+  | 'condition_chain'
+  | 'bare_except'
+  | 'mutable_default_arg'
+  | 'none_comparison'
+  | 'long_function'
+  | 'ignored_error'
+  | 'empty_err_check'
+  | 'panic_usage'
+  | 'generic_exception'
+  | 'public_field'
+  | 'long_method'
+  | 'raw_pointer'
+  | 'using_namespace_std'
+  | 'empty_destructor';
 
 export interface Issue {
   type: IssueType;
+  category: IssueCategory;
   severity: Severity;
   priority: Priority;
   message: string;

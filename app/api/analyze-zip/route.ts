@@ -39,6 +39,25 @@ function getLang(filename: string): 'js' | 'ts' {
     return filename.endsWith('.ts') || filename.endsWith('.tsx') ? 'ts' : 'js';
 }
 
+function getLanguageId(filename: string): string {
+    const ext = filename.toLowerCase().split('.').pop() ?? '';
+    const extMap: Record<string, string> = {
+        'js': 'js',
+        'ts': 'ts',
+        'py': 'py',
+        'java': 'java',
+        'go': 'go',
+        'cpp': 'cpp',
+        'cc': 'cpp',
+        'cxx': 'cpp',
+        'c': 'cpp', // group C with C++
+        'cs': 'java', // C# uses similar patterns to Java
+        'rs': 'go',   // Rust error patterns similar to Go
+        'rb': 'py',   // Ruby similar to Python
+    };
+    return extMap[ext] || ext;
+}
+
 async function analyzeFile(
     filename: string,
     code: string,
@@ -53,10 +72,12 @@ async function analyzeFile(
             return { score, grade, issues, metrics: summary };
         } catch {
             // fallback to text if AST fails
-            return analyzeText(code);
+            const languageId = getLanguageId(filename);
+            return await analyzeText(code, languageId);
         }
     }
-    return analyzeText(code);
+    const languageId = getLanguageId(filename);
+    return await analyzeText(code, languageId);
 }
 
 export async function POST(req: NextRequest) {
@@ -148,6 +169,7 @@ export async function POST(req: NextRequest) {
             projectMetrics,
             worstFile ? [{
                 type: 'complexity' as const,
+                category: 'structural' as const,
                 severity: 'medium' as const,
                 priority: 'structural' as const,
                 message: `Weakest file: ${worstFile.filename} (score ${worstFile.score}/100)`

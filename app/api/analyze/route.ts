@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
             analysisBase = { score, grade, issues, metrics: summary };
         } else {
             // ⚡ Quick Scan Mode — text-based for all other languages
-            analysisBase = analyzeText(code);
+            analysisBase = await analyzeText(code, language);
         }
 
         // AI explanation (always) — pass mode context for file-aware prompt
